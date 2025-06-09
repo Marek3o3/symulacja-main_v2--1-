@@ -93,3 +93,12 @@ output_video_filename = "dual_satellite_animation.mp4"
 
 # --- Coverage analysis ---
 latitude_limit = 66.73  # Exclude coverage above/below +/- this latitude (e.g., 80 deg)
+
+# --- Scenario Configuration ---
+# Scenario A: Station outage simulation
+disabled_stations = []  # Lista nazw stacji do wyłączenia, np. ['Utqiagvik, USA', 'Dundee, Scotland']
+
+# Scenario B: Random transmission failure simulation  
+enable_random_transmission_failure = False  # True to enable random transmission failures
+transmission_failure_probability = 0.1  # Prawdopodobieństwo utraty transmisji (0.0 - 1.0)
+random_seed = 42  # Seed dla powtarzalności wyników (None dla losowości)

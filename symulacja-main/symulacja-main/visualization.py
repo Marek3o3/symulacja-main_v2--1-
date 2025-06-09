@@ -10,11 +10,17 @@ from config import (
     reception_stations,
     latitude_limit,
     time_step_seconds,
+    disabled_stations,
+    enable_random_transmission_failure,
+    transmission_failure_probability,
+    random_seed,
 )
 import numpy as np
+import pandas as pd
 import csv
 from multiprocessing import Pool, cpu_count
 import functools
+import random
 
 
 def calculate_elevation_angle(sat_lat, sat_lon, sat_alt_km, station_lat, station_lon):
@@ -84,8 +90,8 @@ def calculate_transmission_rate(elevation_deg):
     # Linear interpolation between 5° and 90°, then symmetric for 90° to 175°
     min_elevation = 5.0
     max_elevation = 90.0
-    min_rate = 970.0  # Mbps
-    max_rate = 1940.0  # Mbps
+    min_rate = 50.0  # Mbps
+    max_rate = 1000.0  # Mbps
     
     # For angles > 90°, use symmetric mapping (175° maps to 5°, 90° stays 90°)
     if elevation_deg > 90:
@@ -136,8 +142,12 @@ def calculate_static_coverage(satellites):
 
 
 def process_frame(args):
-    """Process a single frame for coverage calculations."""
+    """Process a single frame for coverage calculations with realistic satellite-station pairing."""
     frame, satellites, sky_datetime_objects = args
+    
+    # Initialize random seed for reproducible results (Scenario B)
+    if random_seed is not None:
+        random.seed(random_seed + frame)  # Different seed for each frame but deterministic
     
     t = sky_datetime_objects[frame]
     ns = Nightshade(t, alpha=0)
@@ -158,6 +168,9 @@ def process_frame(args):
     EARTH_RADIUS_KM = 6371
     all_potential_pairs = []
     
+    # Dictionary to store best station for each satellite: sat_name -> (station_name, rate, elevation, distance)
+    satellite_best_pairs = {}
+    
     for sat_name, params in satellites.items():
         sat_lat = params['latitudes'][frame]
         sat_lon = params['longitudes'][frame]
@@ -175,8 +188,18 @@ def process_frame(args):
                 else:           
                     day_ocean += 1
         
+        # Find best station for this satellite
+        best_station = None
+        best_rate = 0
+        best_elevation = 0
+        best_distance = 0
+        
         # Check station range with elevation-dependent transmission rates
         for st_name, st_info in reception_stations.items():
+            # Scenario A: Skip disabled stations
+            if st_name in disabled_stations:
+                continue
+                
             lat1, lon1 = np.radians(sat_lat), np.radians(sat_lon)
             lat2, lon2 = np.radians(st_info['lat']), np.radians(st_info['lon'])
             dlat = lat2 - lat1
@@ -194,6 +217,7 @@ def process_frame(args):
                 transmission_rate = calculate_transmission_rate(elevation)
                 
                 if transmission_rate > 0:  # Only count if above 5° elevation
+                    # Add to potential pairs (for original statistics)
                     all_potential_pairs.append({
                         'satellite': sat_name,
                         'station': st_name,
@@ -201,16 +225,72 @@ def process_frame(args):
                         'rate_mbps': transmission_rate,
                         'distance_km': distance_km
                     })
+                    
+                    # Check if this is the best station for this satellite
+                    if transmission_rate > best_rate:
+                        best_rate = transmission_rate
+                        best_station = st_name
+                        best_elevation = elevation
+                        best_distance = distance_km
+        
+        # Store best pair for this satellite
+        if best_station is not None:
+            satellite_best_pairs[sat_name] = (best_station, best_rate, best_elevation, best_distance)
     
-    # Select only ONE satellite for transmission (the one with highest rate)
+    # Original logic: Select only ONE satellite for transmission (the one with highest rate)
     transmitting_pairs = []
     total_transmission_rate = 0
     
     if all_potential_pairs:
         # Find the satellite-station pair with the highest transmission rate
         best_pair = max(all_potential_pairs, key=lambda x: x['rate_mbps'])
-        transmitting_pairs.append(best_pair)
-        total_transmission_rate = best_pair['rate_mbps']
+        
+        # Scenario B: Random transmission failure simulation
+        transmission_successful = True
+        if enable_random_transmission_failure:
+            if random.random() < transmission_failure_probability:
+                transmission_successful = False
+        
+        if transmission_successful:
+            transmitting_pairs.append(best_pair)
+            total_transmission_rate = best_pair['rate_mbps']
+    
+    # NEW: Realistic transmission logic - each satellite selects its best station
+    # But each ground station can only handle ONE connection at a time
+    realistic_transmitting_pairs = []
+    aggregated_transmission_rate = 0
+    simultaneous_transmissions = 0
+    occupied_stations = set()  # Track which stations are already in use
+    
+    # Sort satellites by their best transmission rate (highest first) to prioritize better connections
+    sorted_satellites = sorted(
+        satellite_best_pairs.items(), 
+        key=lambda x: x[1][1],  # Sort by rate (index 1 in the tuple)
+        reverse=True
+    )
+    
+    for sat_name, (station_name, rate, elevation, distance) in sorted_satellites:
+        # Check if this station is already occupied
+        if station_name in occupied_stations:
+            continue  # Skip this satellite - its best station is already in use
+            
+        # Scenario B: Random transmission failure simulation
+        transmission_successful = True
+        if enable_random_transmission_failure:
+            if random.random() < transmission_failure_probability:
+                transmission_successful = False
+        
+        if transmission_successful:
+            realistic_transmitting_pairs.append({
+                'satellite': sat_name,
+                'station': station_name,
+                'elevation': elevation,
+                'rate_mbps': rate,
+                'distance_km': distance
+            })
+            aggregated_transmission_rate += rate
+            simultaneous_transmissions += 1
+            occupied_stations.add(station_name)  # Mark this station as occupied
     
     return {
         'frame': frame,
@@ -219,7 +299,12 @@ def process_frame(args):
         'transmitting': len(transmitting_pairs) > 0,
         'transmitting_pairs': transmitting_pairs,
         'total_rate_mbps': total_transmission_rate,
-        'potential_pairs_count': len(all_potential_pairs)
+        'potential_pairs_count': len(all_potential_pairs),
+        # NEW: Realistic transmission metrics
+        'realistic_transmitting_pairs': realistic_transmitting_pairs,
+        'aggregated_transmission_rate': aggregated_transmission_rate,
+        'simultaneous_transmissions': simultaneous_transmissions,
+        'realistic_transmitting': len(realistic_transmitting_pairs) > 0
     }
 
 
@@ -277,7 +362,60 @@ def calculate_coverage_fast(satellites, sky_datetime_objects):
     avg_potential_pairs = np.mean(potential_pairs_stats) if potential_pairs_stats else 0
     max_potential_pairs = np.max(potential_pairs_stats) if potential_pairs_stats else 0
     
+    # NEW: Calculate realistic transmission statistics
+    realistic_total_transmitted_tb = 0
+    realistic_transmit_steps = 0
+    realistic_elevation_stats = []
+    realistic_rate_stats = []
+    aggregated_rate_stats = []
+    simultaneous_transmission_stats = []
+    
+    for result in results:
+        if result.get('realistic_transmitting', False):
+            realistic_transmit_steps += 1
+            # Calculate data transmitted in this step with aggregated rates
+            step_aggregated_rate_mbps = result['aggregated_transmission_rate']
+            step_transmitted_tb = (step_aggregated_rate_mbps * time_step_seconds) / 8 / 1e6  # Convert Mbps*s to TB
+            realistic_total_transmitted_tb += step_transmitted_tb
+            
+            # Collect aggregated statistics
+            aggregated_rate_stats.append(step_aggregated_rate_mbps)
+            simultaneous_transmission_stats.append(result['simultaneous_transmissions'])
+            
+            # Collect individual pair statistics
+            for pair in result['realistic_transmitting_pairs']:
+                realistic_elevation_stats.append(pair['elevation'])
+                realistic_rate_stats.append(pair['rate_mbps'])
+    
+    # Calculate realistic statistics
+    realistic_data_left_tb = max(0, TOTAL_DATA_TB - realistic_total_transmitted_tb)
+    realistic_transmit_seconds = realistic_transmit_steps * time_step_seconds
+    
+    avg_realistic_elevation = np.mean(realistic_elevation_stats) if realistic_elevation_stats else 0
+    min_realistic_elevation = np.min(realistic_elevation_stats) if realistic_elevation_stats else 0
+    max_realistic_elevation = np.max(realistic_elevation_stats) if realistic_elevation_stats else 0
+    avg_realistic_rate = np.mean(realistic_rate_stats) if realistic_rate_stats else 0
+    min_realistic_rate = np.min(realistic_rate_stats) if realistic_rate_stats else 0
+    max_realistic_rate = np.max(realistic_rate_stats) if realistic_rate_stats else 0
+    
+    avg_aggregated_rate = np.mean(aggregated_rate_stats) if aggregated_rate_stats else 0
+    min_aggregated_rate = np.min(aggregated_rate_stats) if aggregated_rate_stats else 0
+    max_aggregated_rate = np.max(aggregated_rate_stats) if aggregated_rate_stats else 0
+    avg_simultaneous = np.mean(simultaneous_transmission_stats) if simultaneous_transmission_stats else 0
+    max_simultaneous = np.max(simultaneous_transmission_stats) if simultaneous_transmission_stats else 0
+    
     # Print results
+    print(f"\n" + "="*70)
+    print("PORÓWNANIE MODELI TRANSMISJI")
+    print("="*70)
+    print(f"Model obecny (najlepsza para):        {total_transmitted_tb:.2f} TB ({(total_transmitted_tb/TOTAL_DATA_TB)*100:.1f}%)")
+    print(f"Model realistyczny (1 sat -> 1 st):  {realistic_total_transmitted_tb:.2f} TB ({(realistic_total_transmitted_tb/TOTAL_DATA_TB)*100:.1f}%)")
+    print(f"Średnia zagregowana przepustowość:    {avg_aggregated_rate:.1f} Mbps")
+    print(f"Maksymalna zagregowana przepustowość:  {max_aggregated_rate:.1f} Mbps")
+    print(f"Średnia liczba równoczesnych transmisji: {avg_simultaneous:.1f}")
+    print(f"Maksymalna liczba równoczesnych transmisji: {max_simultaneous}")
+    print("="*70)
+
     print(f"\n=== COVERAGE ANALYSIS RESULTS ===")
     print(f"Total simulation steps: {num_steps}")
     print(f"Day-Land coverage events: {total_day_land}")
@@ -328,6 +466,25 @@ def calculate_coverage_fast(satellites, sky_datetime_objects):
         writer.writerow(['Max_potential_pairs_single_step', max_potential_pairs])
         writer.writerow(['Steps_with_transmission_capability', sum(1 for x in potential_pairs_stats if x > 0)])
         writer.writerow(['Transmission_selection_efficiency_percent', (total_transmit_steps / max(1, sum(1 for x in potential_pairs_stats if x > 0))) * 100])
+        
+        # NEW: Realistic transmission metrics
+        writer.writerow(['Realistic_data_transmitted_TB', realistic_total_transmitted_tb])
+        writer.writerow(['Realistic_data_remaining_TB', realistic_data_left_tb])
+        writer.writerow(['Realistic_transmission_completion_percent', (realistic_total_transmitted_tb/TOTAL_DATA_TB)*100])
+        writer.writerow(['Realistic_transmission_steps', realistic_transmit_steps])
+        writer.writerow(['Realistic_transmission_time_seconds', realistic_transmit_seconds])
+        writer.writerow(['Realistic_transmission_time_hours', realistic_transmit_seconds/3600])
+        writer.writerow(['Average_aggregated_rate_Mbps', avg_aggregated_rate])
+        writer.writerow(['Min_aggregated_rate_Mbps', min_aggregated_rate])
+        writer.writerow(['Max_aggregated_rate_Mbps', max_aggregated_rate])
+        writer.writerow(['Average_simultaneous_transmissions', avg_simultaneous])
+        writer.writerow(['Max_simultaneous_transmissions', max_simultaneous])
+        writer.writerow(['Realistic_average_elevation_deg', avg_realistic_elevation])
+        writer.writerow(['Realistic_min_elevation_deg', min_realistic_elevation])
+        writer.writerow(['Realistic_max_elevation_deg', max_realistic_elevation])
+        writer.writerow(['Realistic_average_transmission_rate_Mbps', avg_realistic_rate])
+        writer.writerow(['Realistic_min_transmission_rate_Mbps', min_realistic_rate])
+        writer.writerow(['Realistic_max_transmission_rate_Mbps', max_realistic_rate])
     
     # Save transmission time summary
     with open('czas_w_zasiegu.csv', 'w', newline='', encoding='utf-8') as csvfile:
@@ -352,10 +509,31 @@ def calculate_coverage_fast(satellites, sky_datetime_objects):
                         'YES'
                     ])
     
+    # NEW: Save realistic detailed transmission log
+    with open('realistic_transmission_details.csv', 'w', newline='', encoding='utf-8') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(['Frame', 'Satellite', 'Station', 'Elevation_deg', 'Rate_Mbps', 'Distance_km', 'Aggregated_Rate_Mbps', 'Simultaneous_Count'])
+        for result in results:
+            if result.get('realistic_transmitting', False):
+                aggregated_rate = result['aggregated_transmission_rate']
+                simultaneous_count = result['simultaneous_transmissions']
+                for pair in result['realistic_transmitting_pairs']:
+                    writer.writerow([
+                        result['frame'],
+                        pair['satellite'],
+                        pair['station'],
+                        round(pair['elevation'], 2),
+                        round(pair['rate_mbps'], 1),
+                        round(pair['distance_km'], 1),
+                        round(aggregated_rate, 1),
+                        simultaneous_count
+                    ])
+    
     print(f"\nResults saved to:")
     print(f"- 'coverage_results.csv' (summary)")
     print(f"- 'czas_w_zasiegu.csv' (transmission time)")
     print(f"- 'transmission_details.csv' (detailed transmission log)")
+    print(f"- 'realistic_transmission_details.csv' (realistic transmission log)")
 
 
 # Keep these functions for backward compatibility but make them no-ops

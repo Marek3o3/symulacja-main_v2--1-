@@ -1,21 +1,38 @@
-Metric,Value
-Total_simulation_steps,1440
-Day_land_coverage_events,33101
-Day_ocean_coverage_events,113726
-Total_coverage_events,146827
-Transmission_steps,1357
-Transmission_time_seconds,81420
-Transmission_time_hours,22.616666666666667
-Data_transmitted_TB,16.336484779302495
-Data_remaining_TB,28.663515220697505
-Transmission_completion_percent,36.3032995095611
-Average_elevation_deg,60.6580825644511
-Min_elevation_deg,5.455815872303948
-Max_elevation_deg,89.84103878489161
-Average_transmission_rate_Mbps,1605.156942206089
-Min_transmission_rate_Mbps,975.2016634839391
-Max_transmission_rate_Mbps,1938.1859720158218
-Average_potential_pairs_per_step,182.96666666666667
-Max_potential_pairs_single_step,400
-Steps_with_transmission_capability,1357
-Transmission_selection_efficiency_percent,100.0
+Metric                                   , Value
+Total_simulation_steps                   ,   1440
+Day_land_coverage_events                 ,  33101
+Day_ocean_coverage_events                , 113726
+Total_coverage_events                    , 146827
+Transmission_steps                       ,   1357
+Transmission_time_seconds                ,  81420
+Transmission_time_hours                  ,     22.616666666666667
+Data_transmitted_TB                      ,      6.8399000415848885
+Data_remaining_TB                        ,     18.16009995841511
+Transmission_completion_percent          ,     27.359600166339554
+Average_elevation_deg                    ,     60.6580825644511
+Min_elevation_deg                        ,      5.455815872303948
+Max_elevation_deg                        ,     89.84103878489161
+Average_transmission_rate_Mbps           ,    672.0609227791593
+Min_transmission_rate_Mbps               ,     55.09441269045588
+Max_transmission_rate_Mbps               ,    998.2233746546709
+Average_potential_pairs_per_step         ,    182.96666666666667
+Max_potential_pairs_single_step          ,    400
+Steps_with_transmission_capability       ,   1357
+Transmission_selection_efficiency_percent,    100.0
+Realistic_data_transmitted_TB            ,     24.01435469169651
+Realistic_data_remaining_TB              ,      0.9856453083034893
+Realistic_transmission_completion_percent,     96.05741876678604
+Realistic_transmission_steps             ,   1357
+Realistic_transmission_time_seconds      ,  81420
+Realistic_transmission_time_hours        ,     22.616666666666667
+Average_aggregated_rate_Mbps             ,   2359.5533963838366
+Min_aggregated_rate_Mbps                 ,     55.09441269045588
+Max_aggregated_rate_Mbps                 ,   8276.62623952394
+Average_simultaneous_transmissions       ,      6.375829034635225
+Max_simultaneous_transmissions           ,     16
+Realistic_average_elevation_deg          ,     33.63854861740439
+Realistic_min_elevation_deg              ,      5.002364168966093
+Realistic_max_elevation_deg              ,     89.84103878489161
+Realistic_average_transmission_rate_Mbps ,    370.0778963121667
+Realistic_min_transmission_rate_Mbps     ,     50.02642306491516
+Realistic_max_transmission_rate_Mbps     ,    998.2233746546709
