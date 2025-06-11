@@ -3,6 +3,7 @@
 Orbit propagation and FOV calculation functions for satellite simulation.
 """
 import numpy as np
+import math
 from shapely.geometry import box
 from shapely.affinity import rotate
 from skyfield.api import load, EarthSatellite

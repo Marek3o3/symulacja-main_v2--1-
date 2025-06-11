@@ -17,6 +17,7 @@ from config import (
 )
 import numpy as np
 import pandas as pd
+import math
 import csv
 from multiprocessing import Pool, cpu_count
 import functools
@@ -82,30 +83,35 @@ def calculate_elevation_angle(sat_lat, sat_lon, sat_alt_km, station_lat, station
 
 
 def calculate_transmission_rate(elevation_deg):
-    """Calculate transmission rate based on elevation angle supporting full range 5°-175°."""
+    """Calculate transmission rate based on elevation angle using parabolic curve matching the chart."""
     # No transmission below 5 degrees or above 175 degrees
     if elevation_deg < 5 or elevation_deg > 175:
         return 0
     
-    # Linear interpolation between 5° and 90°, then symmetric for 90° to 175°
+    # Parameters matching the curve in the chart
     min_elevation = 5.0
-    max_elevation = 90.0
-    min_rate = 50.0  # Mbps
-    max_rate = 1000.0  # Mbps
+    max_elevation = 175.0
+    peak_elevation = 90.0  # Peak at 90 degrees
+    min_rate = 480.0  # Mbps at 5° and 175°
+    max_rate = 3000.0  # Mbps at 90°
     
-    # For angles > 90°, use symmetric mapping (175° maps to 5°, 90° stays 90°)
-    if elevation_deg > 90:
-        # Map 90°-175° to 90°-5° symmetrically
-        symmetric_elevation = 180 - elevation_deg
-        elevation_for_calc = symmetric_elevation
-    else:
-        elevation_for_calc = elevation_deg
+    # Use quadratic formula for parabolic curve
+    # The curve is symmetric around 90°, so we can use a parabola formula:
+    # rate = a * (elevation - peak)² + max_rate
+    # where 'a' is negative to create downward-opening parabola
     
-    # Clamp elevation to valid range
-    elevation_clamped = np.clip(elevation_for_calc, min_elevation, max_elevation)
+    # Calculate 'a' using the constraint that at min_elevation (5°), rate = min_rate
+    # min_rate = a * (5 - 90)² + max_rate
+    # min_rate = a * 85² + max_rate
+    # a = (min_rate - max_rate) / 85²
+    a = (min_rate - max_rate) / ((min_elevation - peak_elevation) ** 2)
     
-    # Linear interpolation
-    rate = min_rate + (max_rate - min_rate) * (elevation_clamped - min_elevation) / (max_elevation - min_elevation)
+    # Calculate rate using parabolic formula
+    rate = a * ((elevation_deg - peak_elevation) ** 2) + max_rate
+    
+    # Ensure rate doesn't go below minimum
+    rate = max(rate, min_rate)
+    
     return rate
 
 

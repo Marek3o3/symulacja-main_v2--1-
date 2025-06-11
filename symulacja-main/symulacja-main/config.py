@@ -26,16 +26,38 @@ base_satellite = {
 }
 
 satellites = {}
-for i in range(200):
-    sat = base_satellite.copy()
-    # Modyfikacja TLE, aby każda satelita miała unikalną nazwę i lekko zmieniony parametr (np. RAAN)
-    tle2_parts = sat["tle_line2"].split()
-    # Zmieniamy RAAN (pole 3) o 1 stopień na satelitę
-    raan = float(tle2_parts[2]) + i * (360/200)
-    tle2_parts[2] = f"{raan:.4f}"
-    sat["tle_line2"] = " ".join(tle2_parts)
-    sat["color"] = "C" + str(i % 10)  # Kolory cyklicznie
-    satellites[f"SAT_{i+1:03d}"] = sat
+# Configuration for constellations
+num_constellations = 10
+satellites_per_constellation = 20
+constellation_separation_deg = 2.5  # degrees separation between constellations
+
+# Calculate angular separation for 14km spacing at orbital altitude
+orbital_radius_km = R_earth_km + base_satellite["altitude_km"]
+angular_separation_deg = (14.0 / orbital_radius_km) * (180 / 3.14159)  # Convert to degrees
+
+satellite_counter = 0
+for constellation in range(num_constellations):
+    # Base RAAN for this constellation
+    base_raan = float(base_satellite["tle_line2"].split()[2]) + constellation * constellation_separation_deg
+    
+    for sat_in_constellation in range(satellites_per_constellation):
+        sat = base_satellite.copy()
+        tle2_parts = sat["tle_line2"].split()
+        
+        # Set RAAN for constellation separation
+        raan = base_raan % 360  # Keep within 0-360 range
+        tle2_parts[2] = f"{raan:.4f}"
+        
+        # Set Mean Anomaly for satellite spacing within constellation
+        mean_anomaly = sat_in_constellation * angular_separation_deg * (orbital_radius_km / R_earth_km)
+        mean_anomaly = mean_anomaly % 360  # Keep within 0-360 range
+        tle2_parts[5] = f"{mean_anomaly:.4f}"
+        
+        sat["tle_line2"] = " ".join(tle2_parts)
+        sat["color"] = "C" + str(constellation % 10)  # Color by constellation
+        
+        satellite_counter += 1
+        satellites[f"CONST_{constellation+1:02d}_SAT_{sat_in_constellation+1:02d}"] = sat
 
 # --- Time configuration ---
 start_datetime = datetime(2025, 5, 21, 0, 0, 0, tzinfo=utc)

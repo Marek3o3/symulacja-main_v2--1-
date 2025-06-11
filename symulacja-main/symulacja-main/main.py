@@ -6,12 +6,12 @@ Run this script to generate both a static plot and an animation video.
 from orbit import propagate_orbits
 from visualization import animate_coverage, plot_coverage_overlay
 from config import simulation_mode, satellites
+import math
 
 def filter_satellites(satellites, mode):
     return satellites
 
 if __name__ == "__main__":
-    import numpy as np
     # Filter satellites based on simulation_mode
     selected_sats = filter_satellites(satellites, simulation_mode)
     # Propagate orbits and calculate FOVs
